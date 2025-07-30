@@ -97,6 +97,9 @@ export class HandwritingOCRAPI {
 		if (response.status === 413) {
 			throw new Error('File too large (max 20MB)');
 		}
+		if (response.status === 401) {
+			throw new Error('Invalid API key');
+		}
 		if (response.status !== 201) {
 			throw new Error(`Upload failed: ${response.status}`);
 		}
@@ -146,6 +149,9 @@ export class HandwritingOCRAPI {
 			}
 		});
 
+		if (response.status === 401) {
+			throw new Error('Invalid API key');
+		}
 		if (response.status !== 200) {
 			throw new Error(`Failed to download thumbnail: ${response.status}`);
 		}
@@ -164,6 +170,9 @@ export class HandwritingOCRAPI {
 			}
 		});
 
+		if (response.status === 401) {
+			throw new Error('Invalid API key');
+		}
 		if (response.status !== 200) {
 			throw new Error(`Status check failed: ${response.status}`);
 		}
@@ -182,6 +191,9 @@ export class HandwritingOCRAPI {
 			}
 		});
 
+		if (response.status === 401) {
+			throw new Error('Invalid API key');
+		}
 		if (response.status !== 200) {
 			throw new Error(`Failed to get result: ${response.status}`);
 		}

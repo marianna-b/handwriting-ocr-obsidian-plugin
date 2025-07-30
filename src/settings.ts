@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, Notice } from "obsidian";
+import { App, PluginSettingTab, Setting, Notice, TFolder } from "obsidian";
 import HandwritingOCRPlugin from "./main";
 import { HandwritingOCRAPI } from "./api";
 
@@ -25,8 +25,6 @@ export class HandwritingOCRSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "Handwriting OCR" });
-
 		// Add introductory text
 		const introDiv = containerEl.createDiv({ cls: "handwriting-ocr-intro" });
 		
@@ -48,7 +46,7 @@ export class HandwritingOCRSettingTab extends PluginSettingTab {
 
 		// API Key setting
 		new Setting(containerEl)
-			.setName("API Key")
+			.setName("API key")
 			.setDesc("Enter your Handwriting OCR API key")
 			.addText(text => text
 				.setPlaceholder("Enter your API key")
@@ -60,7 +58,7 @@ export class HandwritingOCRSettingTab extends PluginSettingTab {
 
 		// Add a button to validate the API key
 		new Setting(containerEl)
-			.setName("Validate API Key")
+			.setName("Validate API key")
 			.setDesc("Check if your API key is valid and view your credit balance")
 			.addButton(button => button
 				.setButtonText("Validate")
@@ -75,9 +73,6 @@ export class HandwritingOCRSettingTab extends PluginSettingTab {
 		if (this.plugin.settings.apiKey) {
 			this.validateApiKey();
 		}
-
-		// Plugin Settings section
-		containerEl.createEl("h3", { text: "Plugin Settings", cls: "setting-item-heading" });
 
 		// Thumbnail setting
 		new Setting(containerEl)
@@ -141,19 +136,27 @@ export class HandwritingOCRSettingTab extends PluginSettingTab {
 		} catch (error) {
 			// Display error message
 			this.creditDisplay.empty();
+			const errorMessage = error.message.toLowerCase().includes('invalid api key') || error.message.includes('401') 
+				? 'Invalid API key' 
+				: error.message;
+			
 			this.creditDisplay.createEl("div", { 
-				text: `✗ ${error.message}`,
+				text: `✗ ${errorMessage}`,
 				cls: "handwriting-ocr-error"
 			});
 			
-			new Notice(`API key validation failed: ${error.message}`);
+			const noticeMessage = error.message.toLowerCase().includes('invalid api key') || error.message.includes('401')
+				? 'API key is invalid. Please check your API key and try again.'
+				: `API key validation failed: ${error.message}`;
+			
+			new Notice(noticeMessage);
 		}
 	}
 
 	private async createThumbnailFolder() {
 		const thumbnailFolder = "OCR Thumbnails";
 		try {
-			const folderExists = await this.app.vault.adapter.exists(thumbnailFolder);
+			const folderExists = this.app.vault.getAbstractFileByPath(thumbnailFolder) instanceof TFolder;
 			if (!folderExists) {
 				await this.app.vault.createFolder(thumbnailFolder);
 				new Notice("Created 'OCR Thumbnails' folder for storing page images");

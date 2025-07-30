@@ -1,4 +1,4 @@
-import { Editor, Notice, Plugin, TFile, MenuItem, setIcon } from "obsidian";
+import { Editor, Notice, Plugin, TFile, TFolder, MenuItem, setIcon } from "obsidian";
 import { HandwritingOCRSettings, DEFAULT_SETTINGS, HandwritingOCRSettingTab } from "./settings";
 import { HandwritingOCRAPI } from "./api";
 import { extractFilePathFromSelection, getFileFromPath, fileToBlob, validateFileSize } from "./utils";
@@ -102,6 +102,43 @@ export default class HandwritingOCRPlugin extends Plugin {
 		return supportedExtensions.includes(file.extension.toLowerCase());
 	}
 
+	private getUserFriendlyErrorMessage(error: Error): string {
+		const message = error.message.toLowerCase();
+		
+		// API key related errors
+		if (message.includes('invalid api key') || message.includes('401') || message.includes('unauthorized')) {
+			return "API key invalid. Please update your API key in plugin settings.";
+		}
+		
+		// Credit/subscription related errors
+		if (message.includes('insufficient credits') || message.includes('403')) {
+			return "Insufficient credits. Please check your account balance or upgrade your plan.";
+		}
+		
+		// File format errors
+		if (message.includes('unsupported file type') || message.includes('415')) {
+			return "Unsupported file format. Please use JPG, PNG, PDF, or other supported image formats.";
+		}
+		
+		// File size errors
+		if (message.includes('file too large') || message.includes('413')) {
+			return "File too large. Maximum file size is 20MB.";
+		}
+		
+		// Network/timeout errors
+		if (message.includes('timeout') || message.includes('processing timeout')) {
+			return "Processing timeout. The document may be too complex or the service is busy. Please try again.";
+		}
+		
+		// Network errors
+		if (message.includes('network') || message.includes('fetch')) {
+			return "Network error. Please check your internet connection and try again.";
+		}
+		
+		// Default fallback with original message
+		return `OCR failed: ${error.message}`;
+	}
+
 	private async processSelection(editor: Editor, mode: "replace" | "append") {
 		if (!this.api) {
 			new Notice("Please configure your API key in settings");
@@ -131,11 +168,11 @@ export default class HandwritingOCRPlugin extends Plugin {
 			return;
 		}
 
+		const notice = new Notice("Processing with Handwriting OCR...", 0);
+		// Add spinner icon to notice
+		notice.messageEl.prepend(this.createSpinnerIcon());
+		
 		try {
-			const notice = new Notice("Processing with Handwriting OCR...", 0);
-			// Add spinner icon to notice
-			notice.noticeEl.prepend(this.createSpinnerIcon());
-			
 			const fileBlob = await fileToBlob(this.app, file);
 			const result = await this.api.processDocument(fileBlob);
 			
@@ -153,7 +190,8 @@ export default class HandwritingOCRPlugin extends Plugin {
 			new Notice("Text extracted successfully!");
 
 		} catch (error) {
-			new Notice(`OCR failed: ${error.message}`);
+			notice.hide();
+			new Notice(this.getUserFriendlyErrorMessage(error));
 		}
 	}
 
@@ -168,11 +206,11 @@ export default class HandwritingOCRPlugin extends Plugin {
 			return;
 		}
 
+		const notice = new Notice("Processing with Handwriting OCR...", 0);
+		// Add spinner icon to notice
+		notice.messageEl.prepend(this.createSpinnerIcon());
+		
 		try {
-			const notice = new Notice("Processing with Handwriting OCR...", 0);
-			// Add spinner icon to notice
-			notice.noticeEl.prepend(this.createSpinnerIcon());
-			
 			const fileBlob = await fileToBlob(this.app, file);
 			const result = await this.api.processDocument(fileBlob);
 			
@@ -185,7 +223,8 @@ export default class HandwritingOCRPlugin extends Plugin {
 			new Notice("Text copied to clipboard!");
 
 		} catch (error) {
-			new Notice(`OCR failed: ${error.message}`);
+			notice.hide();
+			new Notice(this.getUserFriendlyErrorMessage(error));
 		}
 	}
 
@@ -200,11 +239,11 @@ export default class HandwritingOCRPlugin extends Plugin {
 			return;
 		}
 
+		const notice = new Notice("Processing with Handwriting OCR...", 0);
+		// Add spinner icon to notice
+		notice.messageEl.prepend(this.createSpinnerIcon());
+		
 		try {
-			const notice = new Notice("Processing with Handwriting OCR...", 0);
-			// Add spinner icon to notice
-			notice.noticeEl.prepend(this.createSpinnerIcon());
-			
 			const fileBlob = await fileToBlob(this.app, file);
 			const result = await this.api.processDocument(fileBlob);
 			
@@ -251,21 +290,22 @@ export default class HandwritingOCRPlugin extends Plugin {
 			new Notice("Text extracted to new note!");
 
 		} catch (error) {
-			new Notice(`OCR failed: ${error.message}`);
+			notice.hide();
+			new Notice(this.getUserFriendlyErrorMessage(error));
 		}
 	}
 
 	private async saveThumbnail(thumbnailData: ArrayBuffer, noteName: string, pageNumber: number): Promise<string> {
 		// Create OCR Thumbnails folder if it doesn't exist
 		const thumbnailFolder = "OCR Thumbnails";
-		const folderExists = await this.app.vault.adapter.exists(thumbnailFolder);
+		const folderExists = this.app.vault.getAbstractFileByPath(thumbnailFolder) instanceof TFolder;
 		if (!folderExists) {
 			await this.app.vault.createFolder(thumbnailFolder);
 		}
 
 		// Create subfolder for this document
 		const docFolder = `${thumbnailFolder}/${noteName}`;
-		const docFolderExists = await this.app.vault.adapter.exists(docFolder);
+		const docFolderExists = this.app.vault.getAbstractFileByPath(docFolder) instanceof TFolder;
 		if (!docFolderExists) {
 			await this.app.vault.createFolder(docFolder);
 		}
@@ -280,7 +320,7 @@ export default class HandwritingOCRPlugin extends Plugin {
 	private async createThumbnailFolderIfNeeded() {
 		const thumbnailFolder = "OCR Thumbnails";
 		try {
-			const folderExists = await this.app.vault.adapter.exists(thumbnailFolder);
+			const folderExists = this.app.vault.getAbstractFileByPath(thumbnailFolder) instanceof TFolder;
 			if (!folderExists) {
 				await this.app.vault.createFolder(thumbnailFolder);
 			}
@@ -307,19 +347,16 @@ export default class HandwritingOCRPlugin extends Plugin {
 			return;
 		}
 
+		const notice = new Notice("Processing with Handwriting OCR...", 0);
+		// Add spinner icon to notice
+		notice.messageEl.prepend(this.createSpinnerIcon());
+		
 		try {
-			const notice = new Notice("Processing with Handwriting OCR...", 0);
-			// Add spinner icon to notice
-			notice.noticeEl.prepend(this.createSpinnerIcon());
-			
 			const fileBlob = await fileToBlob(this.app, file);
 			const result = await this.api.processDocument(fileBlob);
 			
 			notice.hide();
 
-			// Get current content of active note
-			const currentContent = await this.app.vault.read(activeFile);
-			
 			// Create append content with pages and optional thumbnails
 			let appendContent = `\n\n---\n\n# OCR Extract from ${file.basename}\n\n`;
 			
@@ -345,12 +382,13 @@ export default class HandwritingOCRPlugin extends Plugin {
 			appendContent += `Source: [[${file.path}]]`;
 			
 			// Append to the active note
-			await this.app.vault.modify(activeFile, currentContent + appendContent);
+			await this.app.vault.append(activeFile, appendContent);
 			
 			new Notice("Text appended to active note!");
 
 		} catch (error) {
-			new Notice(`OCR failed: ${error.message}`);
+			notice.hide();
+			new Notice(this.getUserFriendlyErrorMessage(error));
 		}
 	}
 

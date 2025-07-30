@@ -9,8 +9,14 @@
 /* Spinner animation for loader icon */
 .handwriting-ocr-spinner {
 	animation: handwriting-ocr-spin 1s linear infinite;
-	display: inline-block;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	margin-right: 8px;
+	transform-origin: center center;
+	vertical-align: middle;
+	width: 16px;
+	height: 16px;
 }
 
 @keyframes handwriting-ocr-spin {
