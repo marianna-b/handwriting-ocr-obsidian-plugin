@@ -1,11 +1,17 @@
-import { Editor, Notice, Plugin, TFile, TFolder, MenuItem, setIcon } from "obsidian";
+import { Editor, Notice, Plugin, TFile, TFolder, MenuItem, setIcon, EventRef } from "obsidian";
 import { HandwritingOCRSettings, DEFAULT_SETTINGS, HandwritingOCRSettingTab } from "./settings";
 import { HandwritingOCRAPI } from "./api";
 import { extractFilePathFromSelection, getFileFromPath, fileToBlob, validateFileSize } from "./utils";
+import { ProcessingQueue } from "./queue";
+import { AutoProcessor } from "./auto-processor";
 
 export default class HandwritingOCRPlugin extends Plugin {
 	settings: HandwritingOCRSettings;
 	api: HandwritingOCRAPI | null = null;
+	processingQueue: ProcessingQueue;
+	autoProcessor: AutoProcessor | null = null;
+	private vaultCreateListener: EventRef | null = null;
+	private vaultModifyListener: EventRef | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -15,9 +21,9 @@ export default class HandwritingOCRPlugin extends Plugin {
 			this.api = new HandwritingOCRAPI(this.settings.apiKey);
 		}
 
-		// Create OCR Thumbnails folder if thumbnails are enabled
+		// Create image folder if thumbnails are enabled
 		if (this.settings.includeThumbnails) {
-			await this.createThumbnailFolderIfNeeded();
+			await this.createImageFolderIfNeeded();
 		}
 
 		// Add commands
@@ -74,11 +80,28 @@ export default class HandwritingOCRPlugin extends Plugin {
 			})
 		);
 
+		// Initialize processing queue
+		this.processingQueue = new ProcessingQueue(async (file) => {
+			if (this.autoProcessor) {
+				await this.autoProcessor.processFile(
+					file,
+					(f) => this.extractToNewNote(f),
+					(f) => this.appendToSourceNote(f)
+				);
+			}
+		});
+
+		// Initialize auto-processor if enabled
+		this.initializeAutoProcessor();
+
 		// Add settings tab
 		this.addSettingTab(new HandwritingOCRSettingTab(this.app, this));
 	}
 
-	onunload() {}
+	onunload() {
+		this.cleanupAutoProcessor();
+		this.processingQueue.clear();
+	}
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -92,6 +115,49 @@ export default class HandwritingOCRPlugin extends Plugin {
 		} else {
 			this.api = null;
 		}
+		// Reinitialize auto-processor when settings change
+		this.initializeAutoProcessor();
+	}
+
+	private initializeAutoProcessor() {
+		this.cleanupAutoProcessor();
+		
+		if (this.settings.enableAutoProcessing && this.settings.watchFolder) {
+			this.autoProcessor = new AutoProcessor(this.app, this.settings);
+			
+			// Defer vault event registration to avoid processing on startup
+			// This prevents re-processing files when Obsidian restarts
+			setTimeout(() => {
+				// Register vault event listeners
+				this.vaultCreateListener = this.app.vault.on('create', async (file) => {
+					if (file instanceof TFile && this.autoProcessor) {
+						if (await this.autoProcessor.shouldProcess(file)) {
+							this.processingQueue.add(file);
+						}
+					}
+				});
+				
+				this.vaultModifyListener = this.app.vault.on('modify', async (file) => {
+					if (file instanceof TFile && this.autoProcessor) {
+						if (await this.autoProcessor.shouldProcess(file)) {
+							this.processingQueue.add(file);
+						}
+					}
+				});
+			}, 1000);
+		}
+	}
+	
+	private cleanupAutoProcessor() {
+		if (this.vaultCreateListener) {
+			this.app.vault.offref(this.vaultCreateListener);
+			this.vaultCreateListener = null;
+		}
+		if (this.vaultModifyListener) {
+			this.app.vault.offref(this.vaultModifyListener);
+			this.vaultModifyListener = null;
+		}
+		this.autoProcessor = null;
 	}
 
 	private isSupportedFile(file: TFile): boolean {
@@ -279,8 +345,33 @@ export default class HandwritingOCRPlugin extends Plugin {
 			// Small delay to ensure all thumbnails are saved before creating the note
 			await new Promise(resolve => setTimeout(resolve, 100));
 			
+			// Determine note path based on settings
+			let notePath = this.settings.noteFolder 
+				? `${this.settings.noteFolder}/${noteName}.md`
+				: `${noteName}.md`;
+			
+			// Ensure note folder exists
+			if (this.settings.noteFolder) {
+				const folderExists = this.app.vault.getAbstractFileByPath(this.settings.noteFolder) instanceof TFolder;
+				if (!folderExists) {
+					await this.app.vault.createFolder(this.settings.noteFolder);
+				}
+			}
+			
+			// Check if file already exists and find unique name
+			let counter = 1;
+			let basePath = notePath;
+			while (this.app.vault.getAbstractFileByPath(notePath)) {
+				const baseFolder = this.settings.noteFolder || '';
+				const nameWithCounter = `${noteName} ${counter}`;
+				notePath = baseFolder 
+					? `${baseFolder}/${nameWithCounter}.md`
+					: `${nameWithCounter}.md`;
+				counter++;
+			}
+			
 			const newFile = await this.app.vault.create(
-				`${noteName}.md`,
+				notePath,
 				noteContent
 			);
 
@@ -296,15 +387,15 @@ export default class HandwritingOCRPlugin extends Plugin {
 	}
 
 	private async saveThumbnail(thumbnailData: ArrayBuffer, noteName: string, pageNumber: number): Promise<string> {
-		// Create OCR Thumbnails folder if it doesn't exist
-		const thumbnailFolder = "OCR Thumbnails";
-		const folderExists = this.app.vault.getAbstractFileByPath(thumbnailFolder) instanceof TFolder;
+		// Create image folder if it doesn't exist
+		const imageFolder = this.settings.imageFolder;
+		const folderExists = this.app.vault.getAbstractFileByPath(imageFolder) instanceof TFolder;
 		if (!folderExists) {
-			await this.app.vault.createFolder(thumbnailFolder);
+			await this.app.vault.createFolder(imageFolder);
 		}
 
 		// Create subfolder for this document
-		const docFolder = `${thumbnailFolder}/${noteName}`;
+		const docFolder = `${imageFolder}/${noteName}`;
 		const docFolderExists = this.app.vault.getAbstractFileByPath(docFolder) instanceof TFolder;
 		if (!docFolderExists) {
 			await this.app.vault.createFolder(docFolder);
@@ -317,12 +408,12 @@ export default class HandwritingOCRPlugin extends Plugin {
 		return thumbnailPath;
 	}
 
-	private async createThumbnailFolderIfNeeded() {
-		const thumbnailFolder = "OCR Thumbnails";
+	private async createImageFolderIfNeeded() {
+		const imageFolder = this.settings.imageFolder;
 		try {
-			const folderExists = this.app.vault.getAbstractFileByPath(thumbnailFolder) instanceof TFolder;
+			const folderExists = this.app.vault.getAbstractFileByPath(imageFolder) instanceof TFolder;
 			if (!folderExists) {
-				await this.app.vault.createFolder(thumbnailFolder);
+				await this.app.vault.createFolder(imageFolder);
 			}
 		} catch (error) {
 			// Folder creation failed, but don't interrupt the flow
@@ -385,6 +476,83 @@ export default class HandwritingOCRPlugin extends Plugin {
 			await this.app.vault.append(activeFile, appendContent);
 			
 			new Notice("Text appended to active note!");
+
+		} catch (error) {
+			notice.hide();
+			new Notice(this.getUserFriendlyErrorMessage(error));
+		}
+	}
+
+	private async appendToSourceNote(file: TFile) {
+		if (!this.api) {
+			new Notice("Please configure your API key in settings");
+			return;
+		}
+
+		if (!validateFileSize(file)) {
+			new Notice("File too large (max 20MB)");
+			return;
+		}
+
+		const notice = new Notice("Processing with Handwriting OCR...", 0);
+		notice.messageEl.prepend(this.createSpinnerIcon());
+		
+		try {
+			const fileBlob = await fileToBlob(this.app, file);
+			const result = await this.api.processDocument(fileBlob);
+			
+			notice.hide();
+
+			// Determine companion note path
+			const baseName = file.basename;
+			const dirPath = file.parent?.path || '';
+			const notePath = dirPath ? `${dirPath}/${baseName}.md` : `${baseName}.md`;
+			
+			// Create append content
+			let appendContent = '';
+			let existingNote = this.app.vault.getAbstractFileByPath(notePath);
+			
+			if (existingNote instanceof TFile) {
+				// Append to existing note
+				appendContent = `\n\n---\n\n# OCR Extract from ${file.basename}\n\n`;
+			} else {
+				// Create new note with header
+				appendContent = `# ${baseName}\n\n`;
+			}
+			
+			for (const pageResult of result.results) {
+				if (this.settings.includeThumbnails && result.thumbnails) {
+					const thumbnail = result.thumbnails.find(t => t.page_number === pageResult.page_number);
+					if (thumbnail) {
+						try {
+							const thumbnailData = await this.api.downloadThumbnail(thumbnail.url);
+							const thumbnailPath = await this.saveThumbnail(thumbnailData, baseName, pageResult.page_number);
+							
+							appendContent += `## Page ${pageResult.page_number}\n\n![[${thumbnailPath}]]\n\n`;
+						} catch (error) {
+							appendContent += `## Page ${pageResult.page_number}\n\n`;
+						}
+					}
+				} else {
+					appendContent += `## Page ${pageResult.page_number}\n\n`;
+				}
+				appendContent += `${pageResult.transcript}\n\n`;
+			}
+			
+			appendContent += `Source: [[${file.path}]]`;
+			
+			if (existingNote instanceof TFile) {
+				await this.app.vault.append(existingNote, appendContent);
+			} else {
+				// Check if metadata indicates already processed to avoid duplicate content
+				if (this.autoProcessor && await this.autoProcessor.isProcessed(file)) {
+					new Notice("File already processed, skipping");
+					return;
+				}
+				await this.app.vault.create(notePath, appendContent);
+			}
+			
+			new Notice("Text appended to source note!");
 
 		} catch (error) {
 			notice.hide();
