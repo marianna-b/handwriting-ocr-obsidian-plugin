@@ -11,6 +11,7 @@ Extract text directly to your clipboard, create new notes with formatted content
 
 - Extract text from images (JPG, PNG, GIF, BMP, TIFF, HEIC, WEBP) and PDFs
 - Superior handwriting recognition compared to standard OCR (and great for printed text too!)
+- **Automatic processing**: Monitor a folder and automatically OCR new files
 - Simple integration with Obsidian's UI:
   - Right-click menu on supported files
   - Command palette commands
@@ -26,6 +27,17 @@ Extract text directly to your clipboard, create new notes with formatted content
 4. Click "Validate" to check your key and view remaining credits
 
 ## Usage
+
+### Automatic Processing
+1. Enable "Automatic processing" in plugin settings
+2. Set a "Watch folder" (e.g., "Inbox")
+3. Choose action:
+   - "Create new note" - creates a separate note with OCR results
+   - "Append to source note" - creates/appends to a companion .md file
+4. Drop supported files into the watch folder
+5. Files are automatically processed and results saved
+
+**Note**: Already-processed files are tracked via hidden metadata files (`.filename.ocr-processed`) and won't be reprocessed unless the file content changes.
 
 ### From Editor
 1. Insert an image or PDF link in your note (e.g., `![[document.pdf]]`)

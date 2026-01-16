@@ -81,3 +81,21 @@ export function validateFileSize(file: TFile): boolean {
 	const maxSize = 20 * 1024 * 1024;
 	return file.stat.size <= maxSize;
 }
+
+export function getFileHash(file: TFile): string {
+	return `${file.stat.mtime}-${file.stat.size}`;
+}
+
+export function getMetadataFilePath(file: TFile): string {
+	const dirPath = file.parent?.path || '';
+	const fileName = file.name;
+	const metadataFileName = `.${fileName}.ocr-processed`;
+	return dirPath ? `${dirPath}/${metadataFileName}` : metadataFileName;
+}
+
+export interface ProcessedMetadata {
+	processedAt: number;
+	fileHash: string;
+	status: 'success' | 'error';
+	errorMessage?: string;
+}

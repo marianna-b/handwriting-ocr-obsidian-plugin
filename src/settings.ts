@@ -5,11 +5,21 @@ import { HandwritingOCRAPI } from "./api";
 export interface HandwritingOCRSettings {
 	apiKey: string;
 	includeThumbnails: boolean;
+	noteFolder: string;
+	imageFolder: string;
+	enableAutoProcessing: boolean;
+	watchFolder: string;
+	autoProcessingAction: 'new-note' | 'append-source';
 }
 
 export const DEFAULT_SETTINGS: HandwritingOCRSettings = {
 	apiKey: "",
-	includeThumbnails: false
+	includeThumbnails: false,
+	noteFolder: "",
+	imageFolder: "OCR Thumbnails",
+	enableAutoProcessing: false,
+	watchFolder: "",
+	autoProcessingAction: "new-note"
 };
 
 export class HandwritingOCRSettingTab extends PluginSettingTab {
@@ -74,21 +84,90 @@ export class HandwritingOCRSettingTab extends PluginSettingTab {
 			this.validateApiKey();
 		}
 
+		// Note folder setting
+		new Setting(containerEl)
+			.setName("Note folder")
+			.setDesc("Folder where new OCR notes will be created (leave empty for vault root)")
+			.addText(text => text
+				.setPlaceholder("e.g., OCR Notes")
+				.setValue(this.plugin.settings.noteFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.noteFolder = value.trim();
+					await this.plugin.saveSettings();
+				}));
+
 		// Thumbnail setting
 		new Setting(containerEl)
 			.setName("Include thumbnails")
-			.setDesc("Include page thumbnails in extracted notes (creates a folder called OCR Thumbnails)")
+			.setDesc("Include page thumbnails in extracted notes")
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.includeThumbnails)
 				.onChange(async (value) => {
 					this.plugin.settings.includeThumbnails = value;
 					await this.plugin.saveSettings();
 					
-					// Create OCR Thumbnails folder when enabled
+					// Create image folder when enabled
 					if (value) {
-						await this.createThumbnailFolder();
+						await this.createImageFolder();
 					}
 				}));
+
+		// Image folder setting
+		new Setting(containerEl)
+			.setName("Image folder")
+			.setDesc("Folder where OCR thumbnails will be stored")
+			.addText(text => text
+				.setPlaceholder("e.g., OCR Thumbnails")
+				.setValue(this.plugin.settings.imageFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.imageFolder = value.trim() || "OCR Thumbnails";
+					await this.plugin.saveSettings();
+				}));
+
+		// Auto-processing section header
+		containerEl.createEl("h3", { text: "Automatic Processing" });
+		
+		// Enable auto-processing toggle
+		new Setting(containerEl)
+			.setName("Enable automatic processing")
+			.setDesc("Automatically process new files added to the watch folder")
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableAutoProcessing)
+				.onChange(async (value) => {
+					this.plugin.settings.enableAutoProcessing = value;
+					await this.plugin.saveSettings();
+				}));
+		
+		// Watch folder setting
+		new Setting(containerEl)
+			.setName("Watch folder")
+			.setDesc("Folder to monitor for new files (leave empty to disable)")
+			.addText(text => text
+				.setPlaceholder("e.g., Inbox")
+				.setValue(this.plugin.settings.watchFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.watchFolder = value.trim();
+					await this.plugin.saveSettings();
+				}));
+		
+		// Auto-processing action setting
+		new Setting(containerEl)
+			.setName("Auto-processing action")
+			.setDesc("What to do with extracted text from auto-processed files")
+			.addDropdown(dropdown => dropdown
+				.addOption("new-note", "Create new note")
+				.addOption("append-source", "Append to source note")
+				.setValue(this.plugin.settings.autoProcessingAction)
+				.onChange(async (value: 'new-note' | 'append-source') => {
+					this.plugin.settings.autoProcessingAction = value;
+					await this.plugin.saveSettings();
+				}));
+		
+		// Warning about credits
+		containerEl.createDiv({ 
+			cls: "setting-item-description", 
+			text: "⚠️ Auto-processing consumes credits for each file. Monitor your balance regularly."
+		});
 
 		// Add help text
 		containerEl.createDiv({ cls: "setting-item-description", text: "Get your API key from " })
@@ -153,13 +232,13 @@ export class HandwritingOCRSettingTab extends PluginSettingTab {
 		}
 	}
 
-	private async createThumbnailFolder() {
-		const thumbnailFolder = "OCR Thumbnails";
+	private async createImageFolder() {
+		const imageFolder = this.plugin.settings.imageFolder;
 		try {
-			const folderExists = this.app.vault.getAbstractFileByPath(thumbnailFolder) instanceof TFolder;
+			const folderExists = this.app.vault.getAbstractFileByPath(imageFolder) instanceof TFolder;
 			if (!folderExists) {
-				await this.app.vault.createFolder(thumbnailFolder);
-				new Notice("Created 'OCR Thumbnails' folder for storing page images");
+				await this.app.vault.createFolder(imageFolder);
+				new Notice(`Created '${imageFolder}' folder for storing page images`);
 			}
 		} catch (error) {
 			// Folder creation failed silently
